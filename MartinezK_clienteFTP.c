@@ -65,23 +65,23 @@ int main(int argc, char *argv[]){
 	printf("SERVER ANSWER: %s\n", buf);
 
 	// ------------- Password read -----------------
-        memset(buf, 0, sizeof(buf));
+	memset(buf, 0, sizeof(buf));
 	memset(msg, 0, sizeof(msg));
-        printf("PASSWORD: ");
-        fflush(stdout);
-        bytes_recv = read(0, buf, sizeof(buf) - 1);
-        buf[bytes_recv] = '\0';
-
-        // ------------- Password formatting ----------
-        buf[strcspn(buf, "\r\n")] = '\0';
-        snprintf(msg, sizeof(msg), "PASS %s\r\n", buf);
-
-        // ------------- Password sent to server ------
-        bytes_sent = send(sd, msg, strlen(msg), 0);
-        memset(buf, 0, sizeof(buf));
-        bytes_recv = recv(sd, buf, sizeof(buf) - 1, 0);
+	printf("PASSWORD: ");
+	fflush(stdout);
+	bytes_recv = read(0, buf, sizeof(buf) - 1);
 	buf[bytes_recv] = '\0';
-        printf("SERVER ANSWER: %s\n", buf);
+
+	// ------------- Password formatting ----------
+	buf[strcspn(buf, "\r\n")] = '\0';
+	snprintf(msg, sizeof(msg), "PASS %s\r\n", buf);
+
+	// ------------- Password sent to server ------
+	bytes_sent = send(sd, msg, strlen(msg), 0);
+	memset(buf, 0, sizeof(buf));
+	bytes_recv = recv(sd, buf, sizeof(buf) - 1, 0);
+	buf[bytes_recv] = '\0';
+	printf("SERVER ANSWER: %s\n", buf);
 
 	//while(1) {
 
