@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <sys/socket.h>
+#include <unistd.h>
+#include <string.h>
 
 int connectTCP(const char *host, const char *service );
 
@@ -29,6 +31,7 @@ int main(int argc, char *argv[]){
 			return 1;
 		}
 	}
+	
 	// Master socket
 	
 	int sd = connectTCP(srv_add, port);
@@ -40,8 +43,24 @@ int main(int argc, char *argv[]){
 	ssize_t bytes_recv = recv(sd, buf, sizeof(buf), 0);
 
 	bytes_recv > 0 ? printf("Server response: %s\n", buf) : printf("Server did not respond\n");
+	
+	memset(buf, 0, sizeof(buf));
+	printf("USER: ");
+	fflush(stdout);
+	bytes_recv = read(0, buf, sizeof(buf));
+	printf("User received: %s\n", buf);
+
+	memset(buf, 0, sizeof(buf));
+	printf("PASSWORD: ");
+	fflush(stdout);
+	bytes_recv = read(0, buf, sizeof(buf));
+	printf("Pass received: %s\n", buf);
+
+	//while(1) {
 
 
+	
+	
 
 	return 0;
 }
