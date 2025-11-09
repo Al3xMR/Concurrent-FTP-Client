@@ -41,10 +41,15 @@ int main(int argc, char *argv[]){
 	char buf[500];
 	char msg[600];
 
-	ssize_t bytes_recv = recv(sd, buf, sizeof(buf), 0);
+	ssize_t bytes_recv = recv(sd, buf, sizeof(buf) - 1, 0);
 	ssize_t bytes_sent;
 
-	bytes_recv > 0 ? printf("Server response: %s\n", buf) : printf("Server did not respond\n");
+	if(bytes_recv > 0){ 
+		buf[bytes_recv] = '\0';
+		printf("Server response: %s\n", buf);
+	}else{
+		printf("Server did not respond\n");
+	}
 
 	// ------------- Username read -----------------	
 	memset(buf, 0, sizeof(buf));
