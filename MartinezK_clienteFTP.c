@@ -24,8 +24,11 @@ int main(int argc, char *argv[]){
                         port = argv[2];
                         break;
 		}
+		default: {
+			printf("Usage: ./MartinezK_clienteFTP <server> <port>\nDefault host: localhost\nDefault port: 21\n");
+			return 1;
+		}
 	}
-	
 	// Master socket
 	
 	int sd = connectTCP(srv_add, port);
