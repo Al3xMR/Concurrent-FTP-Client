@@ -1,215 +1,382 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdbool.h>
+#include <signal.h>
+#include <errno.h>
+#include <netdb.h>
 
+// --- Prototipos de tus archivos auxiliares ---
+int connectTCP(const char *host, const char *service);
 
-int connectTCP(const char *host, const char *service );
+#define BUFSIZE 1024
 
-void readFromShell( char *buf);
-void storeFile( int sd, bool passive, const char *filepath);
-int send_file_over_socket(int data_sock, const char *filepath);
+bool use_passive_mode = true; 
+long long restart_marker = 0;
 
 typedef struct {
-    char ip[32];
-    int port;
-    bool ok;
-} PassiveInfo;
+    int socket_fd;
+    int server_listen_fd;
+} DataConn;
 
-PassiveInfo enterPassiveMode(int sd);
+// --- Prototipos Locales ---
+void readInput(char *buf, size_t size);
+void handleServerResponse(int sd, char *out_buf, size_t size);
+void do_transfer(int control_sd, const char *command, const char *arg, long long offset);
+DataConn establish_data_connection(int control_sd);
+int send_port_command(int control_sd, int *listen_sock);
+int parse_pasv_response(char *buf, char *ip_out, int *port_out);
+const char* get_filename_from_path(const char* path);
+void print_help();
 
-int main(int argc, char *argv[]){
-
-	char *srv_add;
-
-	switch (argc) {
-		case 1: {
-			srv_add = "localhost";
-			break;
-		}
-		case 2: {
-			srv_add = argv[1];
-                        break;
-		}
-		default: {
-			printf("Usage: ./MartinezK_clienteFTP <server>\nDefault host: localhost\n");
-			return 1;
-		}
-	}
-
-	// -*-*-*-*-*-*-* Master socket -*-*-*-*-*-*-*-*
-
-	int sd = connectTCP(srv_add, "ftp");
-
-	sd >= 0 ? printf("Socket created with file descriptor: %d\n", sd) : printf("Error to create the socket\n");
-
-	char buf[500];
-	char msg[600];
-
-	ssize_t bytes_recv = recv(sd, buf, sizeof(buf) - 1, 0);
-	ssize_t bytes_sent;
-
-	if(bytes_recv > 0){
-		buf[bytes_recv] = '\0';
-		printf("Server response: %s\n", buf);
-	}else{
-		printf("Server did not respond\n");
-	}
-
-	while(1) {
-		// ------------- Username read -----------------
-		memset(buf, 0, sizeof(buf));
-		printf("USER: ");
-		fflush(stdout);
-		bytes_recv = read(0, buf, sizeof(buf) - 1);
-		buf[bytes_recv] = '\0';
-
-		// ------------- Username formatting ----------
-		buf[strcspn(buf, "\r\n")] = '\0';
-		snprintf(msg, sizeof(msg), "USER %s\r\n", buf);
-
-		// ------------- Username sent to server ------
-		bytes_sent = send(sd, msg, strlen(msg), 0);
-		memset(buf, 0, sizeof(buf));
-		bytes_recv = recv(sd, buf, sizeof(buf) - 1, 0);
-		buf[bytes_recv] = '\0';
-		printf("SERVER ANSWER: %s\n", buf);
-
-		// ------------- Password read -----------------
-		memset(buf, 0, sizeof(buf));
-		memset(msg, 0, sizeof(msg));
-		printf("PASSWORD: ");
-		fflush(stdout);
-		bytes_recv = read(0, buf, sizeof(buf) - 1);
-		buf[bytes_recv] = '\0';
-
-		// ------------- Password formatting ----------
-		buf[strcspn(buf, "\r\n")] = '\0';
-		snprintf(msg, sizeof(msg), "PASS %s\r\n", buf);
-
-		// ------------- Password sent to server ------
-		bytes_sent = send(sd, msg, strlen(msg), 0);
-		memset(buf, 0, sizeof(buf));
-		bytes_recv = recv(sd, buf, sizeof(buf) - 1, 0);
-		buf[bytes_recv] = '\0';
-		printf("SERVER ANSWER: %s\n", buf);
-
-		// -------------- Validation ------------------
-		if (buf[0] == '2') {
-			break;
-		}
-	}
-
-
-	// ------------- Prompt ----------------------------
-	readFromShell(buf);
-	printf("%s", buf);
-
-	//if (strcmp(buf, "store")) {
-		storeFile( sd, true, "/home/kmartinez/archivosDelCliente/pruebaEnvioFTP.txt");
-	//}
-
-	return 0;
+// Manejador de señal para limpiar procesos hijos
+void child_handler(int sig) {
+    while(waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-void readFromShell( char *buf) {
-	bool validInput = false;
-	ssize_t bytes_recv;
-	while(!validInput) {
-		memset(buf, 0, sizeof(&buf));
-		printf("ftp> ");
-		fflush(stdout);
-		bytes_recv = read(0, buf, sizeof(&buf) - 1);
-		buf[bytes_recv] = '\0';
-        	buf[strcspn(buf, "\r\n")] = '\0';
+int main(int argc, char *argv[]) {
+    char *srv_add;
+    
+    struct sigaction sa;
+    sa.sa_handler = child_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART; 
+    sigaction(SIGCHLD, &sa, NULL);
 
-		if (!strcmp(buf, "store")) {
-			validInput = true;
-		} else {
-			printf("Insert a valid input\n");
-		}
-	}
-}
-
-PassiveInfo enterPassiveMode(int sd) {
-	PassiveInfo info;
-	info.ok = false;
-	memset(info.ip, 0, sizeof(info.ip));
-
-	char msg[64];
-	char buf[256];
-	ssize_t bytes_sent, bytes_recv;
-
-	snprintf(msg, sizeof(msg), "PASV\r\n");
-	bytes_sent = send(sd, msg, strlen(msg), 0);
-	if (bytes_sent <= 0) return info;
-	memset(buf, 0, sizeof(buf));
-
-	bytes_recv = recv(sd, buf, sizeof(buf) - 1, 0);
-	if (bytes_recv <= 0) return info;
-
-	buf[bytes_recv] = '\0';
-
-	int h1, h2, h3, h4, p1, p2;
-	int matched = sscanf(buf, "227 Entering Passive Mode (%d,%d,%d,%d,%d,%d)", &h1, &h2, &h3, &h4, &p1, &p2);
-	if (matched != 6) return info;
-
-	snprintf(info.ip, sizeof(info.ip), "%d.%d.%d.%d", h1, h2, h3, h4);
-	info.port = p1 * 256 + p2;
-	info.ok = true;
-	return info;
-}
-
-void storeFile( int sd, bool passive, const char *filepath) {
-	int pid = fork();
-	if (pid = 0) {
-		char msg[64];
-        	char buf[256];
-        	ssize_t bytes_sent, bytes_recv;
-        	FILE *fp = fopen(filepath, "rb");
-		if (passive) {
-			PassiveInfo info = enterPassiveMode(sd);
-			char port[2];
-			snprintf(port, sizeof(port), "%d", info.port);
-			int nsd = connectTCP(info.ip, port);
-			snprintf(msg, sizeof(msg), "STOR %s\r\n", filepath);
-			printf("\nMensaje de guardado enviado: %s\n", msg);
-		}
-	}
-
-}
-
-int send_file_over_socket(int data_sock, const char *filepath) {
-    FILE *fp = fopen(filepath, "rb");
-    if (!fp) {
-        perror("Error abriendo archivo");
-        return -1;
+    switch (argc) {
+        case 1: srv_add = "localhost"; break;
+        case 2: srv_add = argv[1]; break;
+        default:
+            printf("Usage: %s <server>\n", argv[0]);
+            return 1;
     }
 
-    char buffer[500];
-    size_t bytes_read;
+    int sd = connectTCP(srv_add, "ftp");
+    if (sd < 0) {
+        perror("Error conectando al servidor");
+        return 1;
+    }
+    printf("Conectado a %s (fd: %d)\n", srv_add, sd);
+    
+    char buf[BUFSIZE];
+    handleServerResponse(sd, buf, sizeof(buf));
 
-    while ((bytes_read = fread(buffer, 1, 500, fp)) > 0) {
+    // --- AUTENTICACIÓN ---
+    while(1) {
+        printf("USER: ");
+        readInput(buf, sizeof(buf));
+        dprintf(sd, "USER %s\r\n", buf);
+        handleServerResponse(sd, buf, sizeof(buf));
 
-        size_t total_sent = 0;
-        while (total_sent < bytes_read) {
+        printf("PASSWORD: ");
+        readInput(buf, sizeof(buf));
+        dprintf(sd, "PASS %s\r\n", buf);
+        handleServerResponse(sd, buf, sizeof(buf));
 
-            ssize_t sent = send(data_sock,
-                                buffer + total_sent,
-                                bytes_read - total_sent,
-                                0);
+        if (strncmp(buf, "230", 3) == 0) break;
+        printf("Login fallido.\n");
+    }
 
-            if (sent < 0) {
-                perror("Error enviando datos");
-                fclose(fp);
-                return -1;
+    printf("\n--- Cliente FTP Concurrente ---\n");
+    print_help();
+
+    // --- BUCLE PRINCIPAL ---
+    while (1) {
+        printf("ftp> ");
+        fflush(stdout); 
+        readInput(buf, sizeof(buf));
+
+        if (strlen(buf) == 0) continue;
+
+        if (strncmp(buf, "quit", 4) == 0 || strncmp(buf, "exit", 4) == 0) {
+            dprintf(sd, "QUIT\r\n");
+            handleServerResponse(sd, buf, sizeof(buf));
+            break;
+        }
+        else if (strncmp(buf, "help", 4) == 0) {
+            print_help();
+        }
+        else if (strncmp(buf, "mode", 4) == 0) {
+            use_passive_mode = !use_passive_mode;
+            printf("Modo cambiado a: %s\n", use_passive_mode ? "PASV (Pasivo)" : "PORT (Activo)");
+        }
+        else if (strncmp(buf, "pwd", 3) == 0) {
+            dprintf(sd, "PWD\r\n");
+            handleServerResponse(sd, buf, sizeof(buf));
+        }
+        else if (strncmp(buf, "cd ", 3) == 0) {
+            dprintf(sd, "CWD %s\r\n", buf + 3);
+            handleServerResponse(sd, buf, sizeof(buf));
+        }
+        else if (strncmp(buf, "mkdir ", 6) == 0) {
+            dprintf(sd, "MKD %s\r\n", buf + 6);
+            handleServerResponse(sd, buf, sizeof(buf));
+        }
+        else if (strncmp(buf, "delete ", 7) == 0) {
+            dprintf(sd, "DELE %s\r\n", buf + 7);
+            handleServerResponse(sd, buf, sizeof(buf));
+        }
+        else if (strncmp(buf, "restart ", 8) == 0) {
+            restart_marker = atoll(buf + 8);
+            printf("Marcador REST establecido en byte %lld\n", restart_marker);
+        }
+        // --- LS / DIR (Listar archivos) ---
+        else if (strncmp(buf, "ls", 2) == 0 || strncmp(buf, "dir", 3) == 0) {
+            // Extraer argumentos opcionales (ej: "ls -l" o "ls carpeta")
+            char *args = strchr(buf, ' ');
+            if (args) args++; // Saltar el espacio
+            else args = "";   // Sin argumentos
+            
+            do_transfer(sd, "LIST", args, 0);
+        }
+        // --- PUT ---
+        else if (strncmp(buf, "put ", 4) == 0) {
+            char *path = buf + 4;
+            if (access(path, R_OK) != 0) {
+                perror("Error: No se encuentra el archivo local");
+            } else {
+                do_transfer(sd, "STOR", path, restart_marker);
+                restart_marker = 0;
             }
-
-            total_sent += sent;
+        }
+        // --- GET ---
+        else if (strncmp(buf, "get ", 4) == 0) {
+            char *path = buf + 4;
+            do_transfer(sd, "RETR", path, restart_marker);
+            restart_marker = 0;
+        }
+        else {
+            printf("Comando desconocido. Escriba 'help'.\n");
         }
     }
 
-    fclose(fp);
-    return 0;  // éxito
+    close(sd);
+    return 0;
+}
+
+void print_help() {
+    printf("Comandos disponibles:\n");
+    printf("  ls / dir         : Listar archivos del directorio remoto\n");
+    printf("  get <archivo>    : Descargar archivo\n");
+    printf("  put <archivo>    : Subir archivo\n");
+    printf("  cd <ruta>        : Cambiar directorio remoto\n");
+    printf("  mkdir <nombre>   : Crear directorio remoto\n");
+    printf("  delete <archivo> : Borrar archivo remoto\n");
+    printf("  pwd              : Ver directorio actual\n");
+    printf("  restart <bytes>  : Reiniciar descarga desde byte X\n");
+    printf("  mode             : Alternar entre modo PASV y PORT\n");
+    printf("  quit             : Salir\n");
+}
+
+const char* get_filename_from_path(const char* path) {
+    const char *filename = strrchr(path, '/');
+    if (filename) {
+        return filename + 1; 
+    }
+    return path; 
+}
+
+// Función genérica para STOR, RETR y LIST
+void do_transfer(int control_sd, const char *command, const char *arg, long long offset) {
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("Error fork"); return;
+    }
+    else if (pid > 0) {
+        // Padre retorna inmediatamente
+        return; 
+    }
+
+    // --- PROCESO HIJO ---
+    DataConn dc = establish_data_connection(control_sd);
+    if (dc.socket_fd < 0) {
+        printf("\n[Hijo] Error conexión datos. Terminando.\n");
+        exit(1);
+    }
+
+    char msg[BUFSIZE];
+
+    // Enviar REST (solo para transferencias de archivos, no para LIST)
+    if (offset > 0 && strcmp(command, "LIST") != 0) {
+        snprintf(msg, sizeof(msg), "REST %lld\r\n", offset);
+        send(control_sd, msg, strlen(msg), 0);
+        ssize_t r = recv(control_sd, msg, sizeof(msg)-1, 0);
+        if (r > 0) { msg[r] = 0; printf("\n[Hijo REST] %s", msg); }
+    }
+
+    // Construir comando: "STOR file", "RETR file" o "LIST [path]"
+    if (strlen(arg) > 0)
+        snprintf(msg, sizeof(msg), "%s %s\r\n", command, arg);
+    else
+        snprintf(msg, sizeof(msg), "%s\r\n", command);
+
+    send(control_sd, msg, strlen(msg), 0);
+
+    // Esperar respuesta 150 (Opening data connection)
+    ssize_t r = recv(control_sd, msg, sizeof(msg)-1, 0);
+    if (r > 0) {
+        msg[r] = '\0';
+        printf("\n[Hijo Control] %s", msg);
+        if (msg[0] != '1') { // Si hay error (ej: 550)
+            close(dc.socket_fd);
+            exit(1);
+        }
+    }
+
+    // --- TRANSFERENCIA DE DATOS ---
+    
+    if (strcmp(command, "STOR") == 0) {
+        // SUBIDA
+        FILE *fp = fopen(arg, "rb");
+        if (fp) {
+            if (offset > 0) fseek(fp, offset, SEEK_SET);
+            char filebuf[BUFSIZE];
+            size_t n;
+            while ((n = fread(filebuf, 1, sizeof(filebuf), fp)) > 0) {
+                if (send(dc.socket_fd, filebuf, n, 0) < 0) break;
+            }
+            fclose(fp);
+        }
+    } 
+    else if (strcmp(command, "RETR") == 0) {
+        // BAJADA
+        const char *local_name = get_filename_from_path(arg);
+        FILE *fp;
+        if (offset > 0) {
+            fp = fopen(local_name, "r+b"); 
+            if (fp) fseek(fp, offset, SEEK_SET);
+        } else {
+            fp = fopen(local_name, "wb");
+        }
+
+        if (fp) {
+            char filebuf[BUFSIZE];
+            ssize_t n;
+            while ((n = recv(dc.socket_fd, filebuf, sizeof(filebuf), 0)) > 0) {
+                fwrite(filebuf, 1, n, fp);
+            }
+            fclose(fp);
+        } else {
+            printf("\n[Hijo Error] Fallo al crear archivo local: %s\n", local_name);
+        }
+    }
+    else if (strcmp(command, "LIST") == 0) {
+        // LISTADO (Imprimir a pantalla)
+        char filebuf[BUFSIZE];
+        ssize_t n;
+        // Leemos del socket de datos y escribimos directamente a stdout
+        while ((n = recv(dc.socket_fd, filebuf, sizeof(filebuf), 0)) > 0) {
+            fwrite(filebuf, 1, n, stdout);
+        }
+    }
+
+    close(dc.socket_fd);
+    if (dc.server_listen_fd != -1) close(dc.server_listen_fd);
+
+    // Esperar respuesta 226 (Transfer complete)
+    r = recv(control_sd, msg, sizeof(msg)-1, 0);
+    if (r > 0) {
+        msg[r] = '\0';
+        printf("\n[Hijo Control] %s", msg);
+    }
+
+    exit(0);
+}
+
+DataConn establish_data_connection(int control_sd) {
+    DataConn dc = {-1, -1};
+    char buf[BUFSIZE];
+
+    if (use_passive_mode) {
+        send(control_sd, "PASV\r\n", 6, 0);
+        ssize_t r = recv(control_sd, buf, sizeof(buf)-1, 0);
+        if (r <= 0) return dc;
+        buf[r] = '\0';
+        
+        char ip[32];
+        int port;
+        if (parse_pasv_response(buf, ip, &port)) {
+            char portStr[10];
+            sprintf(portStr, "%d", port);
+            dc.socket_fd = connectTCP(ip, portStr);
+        }
+    } 
+    else {
+        int listen_sd = -1;
+        if (send_port_command(control_sd, &listen_sd) == 0) {
+            dc.server_listen_fd = listen_sd;
+            struct sockaddr_in client_addr;
+            socklen_t addr_len = sizeof(client_addr);
+            dc.socket_fd = accept(listen_sd, (struct sockaddr*)&client_addr, &addr_len);
+        }
+    }
+    return dc;
+}
+
+int send_port_command(int control_sd, int *listen_sock) {
+    struct sockaddr_in local_addr, my_addr;
+    socklen_t len = sizeof(local_addr);
+    getsockname(control_sd, (struct sockaddr *)&local_addr, &len);
+
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&my_addr, 0, sizeof(my_addr));
+    my_addr.sin_family = AF_INET;
+    my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    my_addr.sin_port = 0;
+
+    bind(s, (struct sockaddr *)&my_addr, sizeof(my_addr));
+    listen(s, 1);
+
+    len = sizeof(my_addr);
+    getsockname(s, (struct sockaddr *)&my_addr, &len);
+    *listen_sock = s;
+
+    unsigned char *ip = (unsigned char *)&local_addr.sin_addr.s_addr;
+    unsigned char *p = (unsigned char *)&my_addr.sin_port;
+
+    char msg[BUFSIZE];
+    snprintf(msg, sizeof(msg), "PORT %d,%d,%d,%d,%d,%d\r\n", 
+             ip[0], ip[1], ip[2], ip[3], p[0], p[1]);
+    
+    send(control_sd, msg, strlen(msg), 0);
+
+    char buf[BUFSIZE];
+    ssize_t r = recv(control_sd, buf, sizeof(buf)-1, 0);
+    if (r > 0 && buf[0] == '2') return 0;
+    return -1;
+}
+
+int parse_pasv_response(char *buf, char *ip_out, int *port_out) {
+    int h1, h2, h3, h4, p1, p2;
+    char *start = strchr(buf, '(');
+    if (start && sscanf(start, "(%d,%d,%d,%d,%d,%d)", &h1, &h2, &h3, &h4, &p1, &p2) == 6) {
+        sprintf(ip_out, "%d.%d.%d.%d", h1, h2, h3, h4);
+        *port_out = p1 * 256 + p2;
+        return 1;
+    }
+    return 0;
+}
+
+void readInput(char *buf, size_t size) {
+    if (fgets(buf, size, stdin) != NULL) {
+        buf[strcspn(buf, "\r\n")] = '\0';
+    } else {
+        buf[0] = '\0';
+        if (ferror(stdin)) clearerr(stdin); 
+    }
+}
+
+void handleServerResponse(int sd, char *out_buf, size_t size) {
+    ssize_t r = recv(sd, out_buf, size - 1, 0);
+    if (r > 0) {
+        out_buf[r] = '\0';
+        printf("%s", out_buf);
+    }
 }
