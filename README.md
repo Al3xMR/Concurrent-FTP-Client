@@ -1,46 +1,43 @@
 # Concurrent FTP Client
 
-This project is a **concurrent FTP client** written in **C**, using the **Linux kernel socket API** to connect to an FTP server. It implements commands defined by **[RFC 959](https://www.rfc-editor.org/rfc/rfc959)**.
+A concurrent FTP client for Linux implementing **RFC 959**. It uses a **multi-process architecture** (via `fork()`) to handle file transfers in the background, keeping the shell prompt active for other commands.
 
-## Features
+## Key Features
 
-* Supports **multiple concurrent file transfers** (both upload and download).
-* Keeps the **control connection active** while handling multiple data connections.
-* Uses concurrency to improve transfer performance.
-* Includes helper functions to simplify and optimize socket creation and connection:
+  * **Concurrency:** Non-blocking uploads/downloads.
+  * **Modes:** Supports **Passive (PASV)** (default) and **Active (PORT)**.
+  * **Resuming:** `restart <bytes>` allows resuming interrupted transfers.
+  * **File Management:** `ls`, `cd`, `mkdir`, `delete`, `pwd`.
+  * **Modular C:** Built on Linux Socket API.
 
-  * `connectsock.c`
-  * `connectTCP.c`
-  * `errexit.c`
+## Build & Run
 
-## Build Instructions
-
-A **Makefile** is provided to simplify compilation using **GCC**:
+**Prerequisites:** Linux, GCC, Make.
 
 ```bash
+# 1. Compile
 make
+
+# 2. Run
+./MartinezK_clienteFTP <server_ip>
+# Example: ./MartinezK_clienteFTP 127.0.0.1
 ```
 
-This command builds the main FTP client executable.
+To clean build files: `make clean`
 
-## Usage
+## Commands Reference
 
-After compiling, run the client specifying the FTP server and port:
+Enter credentials when prompted. Once inside (`ftp>`), use:
 
-```bash
-./MartinezK_clienteFTP <server> <port>
-```
+| Category | Commands | Description |
+| :--- | :--- | :--- |
+| **Transfer** | `get <file>`, `put <file>` | Download / Upload files. |
+| | `restart <bytes>` | Start next transfer from byte offset. |
+| **Navigation** | `ls`, `pwd`, `cd <path>` | List, show path, change dir. |
+| **Actions** | `mkdir <name>`, `delete <file>` | Create dir / Delete file. |
+| **System** | `passive` | Toggle PASV / PORT mode. |
+| | `help`, `quit` | Show help / Exit. |
 
-Example:
+-----
 
-```bash
-./MartinezK_clienteFTP 127.0.0.1 21
-```
-
-## Requirements
-
-* Linux operating system
-* **GCC** compiler
-* Standard C libraries
-
-
+*Author: Kevin Martínez | [@Al3xMR](https://github.com/Al3xMR)*
