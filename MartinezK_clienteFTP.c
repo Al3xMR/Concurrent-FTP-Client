@@ -102,9 +102,9 @@ int main(int argc, char *argv[]) {
         else if (strncmp(buf, "help", 4) == 0) {
             print_help();
         }
-        else if (strncmp(buf, "mode", 4) == 0) {
+        else if (strncmp(buf, "passive", 7) == 0) {
             use_passive_mode = !use_passive_mode;
-            printf("Modo cambiado a: %s\n", use_passive_mode ? "PASV (Pasivo)" : "PORT (Activo)");
+            printf("Passive mode: %s.\n", use_passive_mode ? "on" : "off");
         }
         else if (strncmp(buf, "pwd", 3) == 0) {
             dprintf(sd, "PWD\r\n");
@@ -170,7 +170,7 @@ void print_help() {
     printf("  delete <archivo> : Borrar archivo remoto\n");
     printf("  pwd              : Ver directorio actual\n");
     printf("  restart <bytes>  : Reiniciar descarga desde byte X\n");
-    printf("  mode             : Alternar entre modo PASV y PORT\n");
+    printf("  passive          : Alternar modo Pasivo (on/off)\n");
     printf("  quit             : Salir\n");
 }
 
