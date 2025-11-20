@@ -9,6 +9,13 @@ int connectTCP(const char *host, const char *service );
 
 void readFromShell( char *buf);
 
+typedef struct {
+    char ip[32];
+    int port;
+    bool ok;
+} PassiveInfo;
+
+PassiveInfo enterPassiveMode(int sd);
 
 int main(int argc, char *argv[]){
 
@@ -86,12 +93,24 @@ int main(int argc, char *argv[]){
 		buf[bytes_recv] = '\0';
 		printf("SERVER ANSWER: %s\n", buf);
 
+
+
 		// -------------- Validation ------------------
 		if (buf[0] == '2') {
 			break;
 		}
 	}
 
+
+	// ---------------- Transfer mode ---------------
+
+	printf("Passive mode: on\n");
+	PassiveInfo info;
+	info.ok = false;
+	info.ip[0] = '\0';
+	info.port = 0; 
+	info = enterPassiveMode(sd);
+	printf("\nIP:%s\nPuerto:%d\n", info.ip, info.port);
 	// ------------- Prompt ----------------------------
 	readFromShell(buf);
 	printf("%s", buf);
@@ -116,4 +135,33 @@ void readFromShell( char *buf) {
 			printf("Insert a valid input\n");
 		}
 	}
+}
+
+PassiveInfo enterPassiveMode(int sd) {
+	PassiveInfo info;
+	info.ok = false;
+	memset(info.ip, 0, sizeof(info.ip));
+
+	char msg[64];
+	char buf[256];
+	ssize_t bytes_sent, bytes_recv;
+
+	snprintf(msg, sizeof(msg), "PASV\r\n");
+	bytes_sent = send(sd, msg, strlen(msg), 0);
+	if (bytes_sent <= 0) return info;
+	memset(buf, 0, sizeof(buf));
+
+	bytes_recv = recv(sd, buf, sizeof(buf) - 1, 0);
+	if (bytes_recv <= 0) return info;
+
+	buf[bytes_recv] = '\0';
+
+	int h1, h2, h3, h4, p1, p2;
+	int matched = sscanf(buf, "227 Entering Passive Mode (%d,%d,%d,%d,%d,%d)", &h1, &h2, &h3, &h4, &p1, &p2);
+	if (matched != 6) return info;
+
+	snprintf(info.ip, sizeof(info.ip), "%d.%d.%d.%d", h1, h2, h3, h4);
+	info.port = p1 * 256 + p2;
+	info.ok = true;
+	return info;
 }
