@@ -2,8 +2,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdbool.h>
+
 
 int connectTCP(const char *host, const char *service );
+
+void readFromShell( char *buf);
+
 
 int main(int argc, char *argv[]){
 
@@ -26,7 +31,7 @@ int main(int argc, char *argv[]){
 
 	// -*-*-*-*-*-*-* Master socket -*-*-*-*-*-*-*-*
 
-	int sd = connectTCP(srv_add, port);
+	int sd = connectTCP(srv_add, "ftp");
 
 	sd >= 0 ? printf("Socket created with file descriptor: %d\n", sd) : printf("Error to create the socket\n");
 
@@ -87,8 +92,28 @@ int main(int argc, char *argv[]){
 		}
 	}
 
-
-
+	// ------------- Prompt ----------------------------
+	readFromShell(buf);
+	printf("%s", buf);
 
 	return 0;
+}
+
+void readFromShell( char *buf) {
+	bool validInput = false;
+	ssize_t bytes_recv;
+	while(!validInput) {
+		memset(buf, 0, sizeof(&buf));
+		printf("ftp> ");
+		fflush(stdout);
+		bytes_recv = read(0, buf, sizeof(&buf) - 1);
+		buf[bytes_recv] = '\0';
+        	buf[strcspn(buf, "\r\n")] = '\0';
+
+		if (!strcmp(buf, "list")) {
+			validInput = true;
+		} else {
+			printf("Insert a valid input\n");
+		}
+	}
 }
