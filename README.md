@@ -2,6 +2,14 @@
 
 A concurrent FTP client for Linux implementing **RFC 959**. It uses a **multi-process architecture** (via `fork()`) to handle file transfers in the background, keeping the shell prompt active for other commands.
 
+## Implemented Commands
+
+Implemented according to the main project objective:
+- **USER**, **PASS**, **STOR**, **RETR**, **PORT**, **PASV**
+
+Additional commands implemented:
+- **MKD**, **PWD**, **LIST**, **DELE**, **CWD**, **QUIT**
+
 ## Key Features
 
   * **Concurrency:** Non-blocking uploads/downloads.
